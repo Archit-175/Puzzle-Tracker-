@@ -27,6 +27,13 @@
         <p>GeeksforGeeks interview puzzles &middot; your study progress</p>
       </div>
 
+      <!-- Lock toggle: view-only by default, PIN unlocks editing -->
+      <button class="lock-btn" id="lockBtn" type="button" aria-label="Unlock editing with PIN">
+        <svg class="ico-locked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        <svg class="ico-unlocked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>
+        <span class="lock-label">View only</span>
+      </button>
+
       <!-- Profile chip (opens the Profile & Analytics page) -->
       <button class="profile" id="profileChip" type="button" aria-label="Open profile and analytics for Archit Savaliya">
         <span class="avatar" aria-hidden="true">AS</span>
@@ -167,17 +174,21 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
         <span class="label">Export JSON</span>
       </button>
-      <button class="btn" id="importBtn" type="button" title="Import progress from JSON">
+      <button class="btn edit-only" id="snapshotBtn" type="button" title="Download progress.js to publish your progress to the public site">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+        <span class="label">Save snapshot</span>
+      </button>
+      <button class="btn edit-only" id="importBtn" type="button" title="Import progress from JSON">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0L8 7m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
         <span class="label">Import JSON</span>
       </button>
       <input type="file" id="importFile" accept="application/json,.json" hidden />
-      <button class="btn danger" id="resetBtn" type="button" title="Reset all progress &amp; notes">
+      <button class="btn danger edit-only" id="resetBtn" type="button" title="Reset all progress &amp; notes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"/></svg>
         <span class="label">Reset all</span>
       </button>
     </div>
-    <p class="data-note">Export regularly to back up across devices &middot; Notes PDF prints every puzzle note into one document &middot; Reset clears solves &amp; notes (can't be undone).</p>
+    <p class="data-note" id="dataNote">Export regularly to back up across devices &middot; Notes PDF prints every puzzle note into one document &middot; Reset clears solves &amp; notes (can't be undone).</p>
   </section>
 
 </main>
@@ -192,6 +203,7 @@
   <span id="toastMsg"></span>
 </div>
 
+<script src="progress.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

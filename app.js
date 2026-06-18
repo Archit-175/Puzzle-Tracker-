@@ -116,7 +116,22 @@ const PROFILE_NAME   = "Archit Savaliya";
 const STORAGE_KEY = "puzzleTracker.v1";
 let state = { v:1, solved:{}, collapsed:{}, notes:{}, solvedAt:{} };
 
+/* ---- Edit lock (view-only public site; PIN unlocks editing) -------------
+   This is a SOFT lock / showcase guard, not real security: on a public,
+   static site the code is readable and a determined visitor can bypass a
+   client-side check. We store only a SHA-256 hash of the PIN, never the PIN. */
+const PIN_HASH = "4401dfbd4b7faaf470f94888cca5b473f0590e10c3799088be66cef7da7238f5";
+let editMode = false;
+try{ editMode = sessionStorage.getItem("pt.edit") === "1"; }catch(e){}
+
 function loadState(){
+  // 1) Baseline = the published snapshot shipped with the site (progress.js)
+  const pub = window.PUBLISHED_PROGRESS || {};
+  state.solved   = (pub.solved   && typeof pub.solved   === "object") ? { ...pub.solved }   : {};
+  state.notes    = (pub.notes    && typeof pub.notes    === "object") ? { ...pub.notes }    : {};
+  state.solvedAt = (pub.solvedAt && typeof pub.solvedAt === "object") ? { ...pub.solvedAt } : {};
+  state.collapsed = {};
+  // 2) The owner's working copy (localStorage on their own device) overrides it
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
     if(raw){
@@ -129,8 +144,69 @@ function loadState(){
   }catch(e){ console.warn("Could not read saved state:", e); }
 }
 function saveState(){
+  if(!editMode) return;                       // view-only: never write to storage
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   catch(e){ console.warn("Could not save:", e); toast("Storage full or blocked — couldn't save"); }
+}
+
+/* SHA-256 hex of a string (for verifying the PIN without storing it) */
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+/* Apply the current lock state to the whole UI */
+function applyEditMode(){
+  document.body.classList.toggle("edit-mode", editMode);
+  document.body.classList.toggle("view-mode", !editMode);
+  const lbl = $(".lock-label");
+  if(lbl) lbl.textContent = editMode ? "Editing" : "View only";
+  const lb = $("#lockBtn");
+  if(lb) lb.setAttribute("aria-label", editMode ? "Lock editing" : "Unlock editing with PIN");
+  // Disable ticks + make notes read-only when viewing
+  for(const [, rec] of rowByUrl){
+    rec.input.disabled = !editMode;
+    rec.noteTextarea.readOnly = !editMode;
+  }
+}
+
+async function toggleLock(){
+  if(editMode){
+    editMode = false;
+    try{ sessionStorage.removeItem("pt.edit"); }catch(e){}
+    applyEditMode();
+    toast("Locked — back to view-only");
+    return;
+  }
+  const entry = prompt("Enter PIN to unlock editing:");
+  if(entry == null) return;                   // cancelled
+  let ok = false;
+  try{ ok = (await sha256Hex(entry.trim())) === PIN_HASH; }
+  catch(e){ ok = false; }
+  if(ok){
+    editMode = true;
+    try{ sessionStorage.setItem("pt.edit","1"); }catch(e){}
+    applyEditMode();
+    toast("Editing unlocked");
+  } else {
+    toast("Wrong PIN");
+  }
+}
+
+/* Download the current progress as progress.js to publish to the public site */
+function saveSnapshot(){
+  const snap = {
+    app:"puzzle-tracker", profile:PROFILE_NAME,
+    solved:state.solved, notes:state.notes, solvedAt:state.solvedAt
+  };
+  const body = "/* Published progress snapshot — commit this file to update the public site. */\n"
+             + "window.PUBLISHED_PROGRESS = " + JSON.stringify(snap, null, 2) + ";\n";
+  const blob = new Blob([body], { type:"application/javascript" });
+  const url  = URL.createObjectURL(blob);
+  const a = el("a"); a.href = url; a.download = "progress.js";
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  toast("progress.js downloaded — commit it to publish");
 }
 
 /* =========================================================================
@@ -338,6 +414,7 @@ function render(){
    ACTIONS
    ========================================================================= */
 function toggleSolved(url, solved){
+  if(!editMode) return;                       // view-only guard
   if(solved){
     state.solved[url] = true;
     if(!state.solvedAt[url]) state.solvedAt[url] = todayStr();   // stamp the day it was solved
@@ -929,10 +1006,13 @@ function route(){
    ========================================================================= */
 loadState();
 render();
+applyEditMode();
 updateProgress();
 applyFilter();
 route();
 
+$("#lockBtn").addEventListener("click", toggleLock);
+$("#snapshotBtn").addEventListener("click", saveSnapshot);
 $("#profileChip").addEventListener("click", () => { location.hash = "profile"; });
 $("#backBtn").addEventListener("click",    () => { location.hash = "puzzles"; });
 window.addEventListener("hashchange", route);

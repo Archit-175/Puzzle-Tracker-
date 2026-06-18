@@ -486,6 +486,38 @@ svg.chart{ display:block; width:100%; height:auto; }
 .data-actions .btn{ flex:0 0 auto; }
 .data-note{ margin-top:14px; font-size:.78rem; color:var(--ink-3); }
 
+/* =========================================================================
+   VIEW-ONLY / EDIT MODE LOCK
+   ========================================================================= */
+.lock-btn{
+  display:inline-flex; align-items:center; gap:7px; flex:0 0 auto;
+  padding:7px 12px; min-height:38px;
+  border:1px solid var(--line); border-radius:99px; background:var(--card);
+  color:var(--ink-2); font-size:.8rem; font-weight:600; white-space:nowrap;
+  transition:background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease;
+}
+.lock-btn svg{ width:15px; height:15px; }
+.lock-btn:hover{ border-color:var(--green-line); color:var(--ink); background:var(--green-tint); }
+.lock-btn:active{ transform:translateY(1px); }
+.lock-btn .ico-unlocked{ display:none; }
+/* Edit mode = unlocked: green pill, swapped icon */
+body.edit-mode .lock-btn{ background:var(--green); border-color:var(--green); color:#fff; }
+body.edit-mode .lock-btn .ico-locked{ display:none; }
+body.edit-mode .lock-btn .ico-unlocked{ display:inline; }
+
+/* Hide edit-only actions while viewing */
+body.view-mode .edit-only{ display:none !important; }
+
+/* Read-only affordances on the puzzle list */
+body.view-mode .tick{ cursor:default; }
+body.view-mode .tick input{ cursor:default; }
+body.view-mode .tick-box{ opacity:.95; }
+/* Don't reveal empty note editors to visitors — only notes that exist */
+body.view-mode .note-btn:not(.has-note){ display:none; }
+body.view-mode .note-wrap{ background:var(--page); }
+body.view-mode .note-wrap textarea{ cursor:default; }
+body.view-mode .note-foot{ display:none; }
+
 /* Footer */
 footer{
   max-width:var(--max); margin:0 auto; padding:0 clamp(14px,4vw,26px) 48px;
