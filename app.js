@@ -147,6 +147,7 @@ function saveState(){
   if(!editMode) return;                       // view-only: never write to storage
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   catch(e){ console.warn("Could not save:", e); toast("Storage full or blocked — couldn't save"); }
+  schedulePush();
 }
 
 /* SHA-256 hex of a string (for verifying the PIN without storing it) */
@@ -154,6 +155,41 @@ async function sha256Hex(str){
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,"0")).join("");
 }
+
+/* ---- PIN-encrypted token (cross-browser sync without re-entering the token)
+   The GitHub token is encrypted with the owner's PIN (PBKDF2 + AES-GCM) and the
+   ciphertext is committed in progress.js. Any browser that knows the PIN can
+   decrypt it — the plaintext token is never stored in the repo or localStorage
+   in the clear. Security rests on the PIN's strength: use a long, non-trivial
+   PIN (the published PIN hash is brute-forceable for short numeric PINs). */
+const PIN_KDF_ITERS = 250000;
+function _b64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function _unb64(s){ return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+
+async function deriveAesKey(pin, salt){
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name:"PBKDF2", salt, iterations:PIN_KDF_ITERS, hash:"SHA-256" },
+    base, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"]
+  );
+}
+async function encryptToken(token, pin){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const key  = await deriveAesKey(pin, salt);
+  const ct   = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, key, new TextEncoder().encode(token));
+  return { v:1, salt:_b64(salt), iv:_b64(iv), ct:_b64(ct) };
+}
+async function decryptToken(blob, pin){
+  const key = await deriveAesKey(pin, _unb64(blob.salt));
+  const pt  = await crypto.subtle.decrypt({ name:"AES-GCM", iv:_unb64(blob.iv) }, key, _unb64(blob.ct));
+  return new TextDecoder().decode(pt);
+}
+
+/* PIN held in memory after unlock (never persisted) + a pending encrypted
+   token blob waiting to be written into the next saved snapshot. */
+let currentPin       = null;
+let pendingCloudBlob = null;
 
 /* Apply the current lock state to the whole UI */
 function applyEditMode(){
@@ -168,11 +204,16 @@ function applyEditMode(){
     rec.input.disabled = !editMode;
     rec.noteTextarea.readOnly = !editMode;
   }
+  // Sync daily puzzle ticks
+  document.querySelectorAll(".daily-card input[type='checkbox']").forEach(cb => {
+    cb.disabled = !editMode;
+  });
 }
 
 async function toggleLock(){
   if(editMode){
     editMode = false;
+    currentPin = null;                        // forget the PIN on lock
     try{ sessionStorage.removeItem("pt.edit"); }catch(e){}
     applyEditMode();
     toast("Locked — back to view-only");
@@ -180,24 +221,39 @@ async function toggleLock(){
   }
   const entry = prompt("Enter PIN to unlock editing:");
   if(entry == null) return;                   // cancelled
+  const pin = entry.trim();
   let ok = false;
-  try{ ok = (await sha256Hex(entry.trim())) === PIN_HASH; }
+  try{ ok = (await sha256Hex(pin)) === PIN_HASH; }
   catch(e){ ok = false; }
   if(ok){
     editMode = true;
+    currentPin = pin;                         // keep in memory for token encrypt/decrypt
     try{ sessionStorage.setItem("pt.edit","1"); }catch(e){}
     applyEditMode();
     toast("Editing unlocked");
+    maybeAutoConnectCloud(pin);               // PIN-unlock cloud sync if a token was published
   } else {
     toast("Wrong PIN");
   }
 }
 
+/* Show a locked warning toast */
+function showLockWarning(){
+  const t = document.getElementById("toast");
+  t.classList.add("locked");
+  toast("Locked — click the lock icon and enter PIN to edit");
+  setTimeout(() => t.classList.remove("locked"), 3600);
+}
+
 /* Download the current progress as progress.js to publish to the public site */
 function saveSnapshot(){
+  // Carry forward the PIN-encrypted sync token: a freshly set one, else the
+  // one already published with the site. Safe to commit — useless without the PIN.
+  const cloudBlob = pendingCloudBlob || (window.PUBLISHED_PROGRESS && window.PUBLISHED_PROGRESS.cloud) || null;
   const snap = {
     app:"puzzle-tracker", profile:PROFILE_NAME,
-    solved:state.solved, notes:state.notes, solvedAt:state.solvedAt
+    solved:state.solved, notes:state.notes, solvedAt:state.solvedAt,
+    cloud:cloudBlob
   };
   const body = "/* Published progress snapshot — commit this file to update the public site. */\n"
              + "window.PUBLISHED_PROGRESS = " + JSON.stringify(snap, null, 2) + ";\n";
@@ -206,7 +262,9 @@ function saveSnapshot(){
   const a = el("a"); a.href = url; a.download = "progress.js";
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
-  toast("progress.js downloaded — commit it to publish");
+  toast(cloudBlob
+    ? "progress.js downloaded — commit it to enable PIN-unlock sync everywhere"
+    : "progress.js downloaded — commit it to publish");
 }
 
 /* =========================================================================
@@ -266,6 +324,7 @@ function render(){
 
   groups.forEach((group, gi) => {
     const sec = el("section","section");
+    sec.dataset.cat = group.category;
     sec.style.animationDelay = (gi*55) + "ms";
     if(state.collapsed[group.category]) sec.classList.add("collapsed");
 
@@ -316,6 +375,7 @@ function render(){
       box.appendChild(svg("M20 6 9 17l-5-5"));
       label.appendChild(input); label.appendChild(box);
       row.appendChild(label);
+      label.addEventListener("click", () => { if(!editMode) showLockWarning(); });
 
       // Title + tags
       const main = el("div","p-main");
@@ -330,7 +390,9 @@ function render(){
       main.appendChild(a);
 
       const tags = el("div","tags");
-      tags.appendChild(el("span","tag cat", p.category));
+      const catTag = el("span","tag cat", p.category);
+      catTag.dataset.cat = p.category;
+      tags.appendChild(catTag);
       for(const co of p.companies) tags.appendChild(el("span","tag co", co));
       main.appendChild(tags);
       row.appendChild(main);
@@ -378,6 +440,8 @@ function render(){
       // Wire note button
       noteBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleNote(p.url); });
 
+      // Warn on keydown when locked
+      textarea.addEventListener("keydown", () => { if(!editMode) showLockWarning(); });
       // Auto-save on input (debounced)
       textarea.addEventListener("input", () => {
         noteChars.textContent = textarea.value.length + " chars";
@@ -414,7 +478,7 @@ function render(){
    ACTIONS
    ========================================================================= */
 function toggleSolved(url, solved){
-  if(!editMode) return;                       // view-only guard
+  if(!editMode){ showLockWarning(); return; } // view-only guard
   if(solved){
     state.solved[url] = true;
     if(!state.solvedAt[url]) state.solvedAt[url] = todayStr();   // stamp the day it was solved
@@ -424,6 +488,14 @@ function toggleSolved(url, solved){
   }
   const rec = rowByUrl.get(url);
   if(rec) rec.li.classList.toggle("solved", solved);
+  // Sync daily card if this puzzle appears there
+  document.querySelectorAll(".daily-card").forEach(c => {
+    if(c.dataset.url === url){
+      c.classList.toggle("solved", solved);
+      const cb = c.querySelector("input[type='checkbox']");
+      if(cb) cb.checked = solved;
+    }
+  });
   saveState();
   updateProgress();
   applyFilter();
@@ -940,7 +1012,7 @@ function buildCategoryBars(){
   ];
   return order.map(c => {
     const t = totals[c], s = solved[c] || 0, pct = Math.round(s/t*100);
-    return `<div class="cat-row ${s===t ? "done" : ""}">
+    return `<div class="cat-row ${s===t ? "done" : ""}" data-cat="${c}">
       <span class="cname" title="${c}">${c}</span>
       <span class="ctrack"><i style="width:${pct}%"></i></span>
       <span class="cnum">${s}/${t}</span>
@@ -998,14 +1070,350 @@ function route(){
   document.body.classList.toggle("view-puzzles", !onProfile);
   $("#profile").hidden = !onProfile;
   $("#list").hidden    = onProfile;
-  if(onProfile){ renderAnalytics(); window.scrollTo(0, 0); }
+  if(onProfile){ renderAnalytics(); }
+  window.scrollTo(0, 0);
+}
+
+/* =========================================================================
+   DAILY PUZZLES  — 3 random questions per day, no repeats until all done
+   ========================================================================= */
+const DAILY_KEY = "puzzleTracker.daily";
+
+function shuffle(arr){
+  const a = [...arr];
+  for(let i = a.length-1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i+1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function getDailyPicks(){
+  const today = todayStr();
+  const allUrls = PUZZLES.map(p => p.url);
+  let ds = null;
+  try{ const raw = localStorage.getItem(DAILY_KEY); if(raw) ds = JSON.parse(raw); }catch(e){}
+
+  // Return today's existing picks if still valid
+  if(ds && ds.date === today && Array.isArray(ds.picks) && ds.picks.length === 3){
+    const valid = ds.picks.filter(u => allUrls.includes(u));
+    if(valid.length === 3) return valid;
+  }
+
+  // Build / continue the queue (filter out any stale URLs after puzzle list changes)
+  let queue = (ds && Array.isArray(ds.queue)) ? ds.queue.filter(u => allUrls.includes(u)) : [];
+  if(queue.length < 3){
+    const inQueue = new Set(queue);
+    queue.push(...shuffle(allUrls.filter(u => !inQueue.has(u))));
+  }
+
+  const picks = queue.splice(0, 3);
+  try{ localStorage.setItem(DAILY_KEY, JSON.stringify({ date:today, picks, queue })); }catch(e){}
+  return picks;
+}
+
+function renderDailySection(){
+  const picks = getDailyPicks();
+  const formatted = new Date().toLocaleDateString("en-IN",{day:"numeric",month:"long",year:"numeric"});
+
+  const wrap = el("div","daily-section");
+
+  // Header
+  const head = el("div","daily-head");
+  const tw = el("div","daily-title-wrap");
+  const calIcon = svg(
+    ["M8 2v4M16 2v4","M3 8h18","M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"],
+    {"class":"daily-cal-ico","stroke-width":"2"}
+  );
+  const tt = el("div","daily-title-text");
+  const h = el("h2",null,"Today's Puzzles");
+  const sub = el("p","daily-sub", formatted + "  ·  " + picks.length + " of " + PUZZLES.length);
+  tt.appendChild(h); tt.appendChild(sub);
+  tw.appendChild(calIcon); tw.appendChild(tt);
+  head.appendChild(tw);
+  head.appendChild(el("span","daily-refresh","Refreshes tomorrow"));
+  wrap.appendChild(head);
+
+  // Cards
+  const cards = el("div","daily-cards");
+  picks.forEach((url, i) => {
+    const p = PUZZLES.find(x => x.url === url);
+    if(!p) return;
+    const card = el("div","daily-card");
+    card.dataset.url = url;
+    if(state.solved[url]) card.classList.add("solved");
+
+    // Tick
+    const tickLabel = el("label","tick");
+    const tickInput = document.createElement("input");
+    tickInput.type = "checkbox";
+    tickInput.checked = !!state.solved[url];
+    tickInput.disabled = !editMode;
+    tickInput.setAttribute("aria-label", 'Mark "'+p.title+'" as solved');
+    const tickBox = el("span","tick-box");
+    tickBox.appendChild(svg("M20 6 9 17l-5-5"));
+    tickLabel.appendChild(tickInput); tickLabel.appendChild(tickBox);
+    tickLabel.addEventListener("click", () => { if(!editMode) showLockWarning(); });
+    tickInput.addEventListener("change", () => toggleSolved(url, tickInput.checked));
+
+    const num = el("span","daily-num", String(i+1));
+    const link = el("a","daily-info");
+    link.href = url; link.target = "_blank"; link.rel = "noopener";
+    const title = el("div","daily-card-title", p.title);
+    const tags = el("div","daily-card-tags");
+    const dailyCatTag = el("span","tag cat",p.category);
+    dailyCatTag.dataset.cat = p.category;
+    tags.appendChild(dailyCatTag);
+    for(const co of p.companies.slice(0,3)) tags.appendChild(el("span","tag co",co));
+    link.appendChild(title); link.appendChild(tags);
+    const extIco = svg(
+      ["M14 4h6v6","M20 4l-9 9","M9 5H5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"],
+      {"class":"daily-ext","stroke-width":"2"}
+    );
+    card.appendChild(tickLabel); card.appendChild(num); card.appendChild(link); card.appendChild(extIco);
+    cards.appendChild(card);
+  });
+  wrap.appendChild(cards);
+  return wrap;
+}
+
+/* =========================================================================
+   CLOUD SYNC  — GitHub Gist as cross-browser storage
+   ========================================================================= */
+const CLOUD_KEY  = "puzzleTracker.cloud";
+const GIST_FILE  = "puzzle-tracker-progress.json";
+let cloudCfg     = null; // { token, gistId, lastSync }
+let cloudPushTimer = null;
+
+function loadCloudCfg(){
+  try{ const r = localStorage.getItem(CLOUD_KEY); if(r) cloudCfg = JSON.parse(r); }catch(e){}
+}
+function saveCloudCfg(){
+  try{
+    if(cloudCfg) localStorage.setItem(CLOUD_KEY, JSON.stringify(cloudCfg));
+    else         localStorage.removeItem(CLOUD_KEY);
+  }catch(e){}
+}
+
+async function ghFetch(method, path, body){
+  const res = await fetch("https://api.github.com" + path, {
+    method,
+    headers:{
+      "Authorization": "token " + cloudCfg.token,
+      "Accept": "application/vnd.github+json",
+      "Content-Type": "application/json"
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!res.ok) throw new Error("GitHub " + res.status + " " + res.statusText);
+  return res.json();
+}
+
+/* Merge remote state into local (union solved, keep notes if local empty) */
+function mergeRemote(remote){
+  let changed = false;
+  for(const url in (remote.solved||{})){
+    if(remote.solved[url] && !state.solved[url]){
+      state.solved[url] = true;
+      if(remote.solvedAt?.[url] && !state.solvedAt[url]) state.solvedAt[url] = remote.solvedAt[url];
+      changed = true;
+    }
+  }
+  for(const url in (remote.notes||{})){
+    if(remote.notes[url] && !state.notes[url]){
+      state.notes[url] = remote.notes[url];
+      changed = true;
+    }
+  }
+  if(changed){
+    for(const [u, rec] of rowByUrl){
+      const on = !!state.solved[u];
+      rec.input.checked = on;
+      rec.li.classList.toggle("solved", on);
+      if(state.notes[u]){
+        rec.noteTextarea.value = state.notes[u];
+        rec.noteChars.textContent = state.notes[u].length + " chars";
+        rec.noteBtn.classList.add("has-note");
+      }
+    }
+    // Also update daily cards solved state
+    document.querySelectorAll(".daily-card").forEach(c => {
+      const on = !!state.solved[c.dataset.url];
+      c.classList.toggle("solved", on);
+      const cb = c.querySelector("input[type='checkbox']");
+      if(cb) cb.checked = on;
+    });
+    if(editMode) saveState();
+    updateProgress(); applyFilter();
+    if(document.body.classList.contains("view-profile")) renderAnalytics();
+  }
+}
+
+async function cloudPushNow(){
+  if(!cloudCfg?.gistId) return;
+  const snap = { app:"puzzle-tracker", solved:state.solved, notes:state.notes, solvedAt:state.solvedAt };
+  await ghFetch("PATCH", "/gists/" + cloudCfg.gistId, {
+    files:{ [GIST_FILE]:{ content: JSON.stringify(snap, null, 2) } }
+  });
+  cloudCfg.lastSync = new Date().toISOString();
+  saveCloudCfg();
+  setCloudUI("ok");
+}
+
+async function cloudSync(){
+  if(!cloudCfg?.gistId) return;
+  setCloudUI("syncing");
+  try{
+    const gist = await ghFetch("GET", "/gists/" + cloudCfg.gistId);
+    const raw = gist.files?.[GIST_FILE]?.content;
+    if(raw) mergeRemote(JSON.parse(raw));
+    await cloudPushNow();
+    toast("Cloud synced");
+  }catch(e){
+    console.warn("Cloud sync error:", e);
+    setCloudUI("error");
+    toast("Cloud sync failed — check token or network");
+  }
+}
+
+function schedulePush(){
+  if(!cloudCfg?.gistId) return;
+  clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() =>
+    cloudPushNow().catch(() => setCloudUI("error")), 2500);
+}
+
+/* Locate the sync Gist for the current token, creating it if absent.
+   Assumes cloudCfg.token is set; populates cloudCfg.gistId. */
+async function resolveGist(){
+  const gists = await ghFetch("GET", "/gists");
+  const existing = gists.find(g => g.files?.[GIST_FILE]);
+  if(existing){
+    cloudCfg.gistId = existing.id;
+  } else {
+    const snap = { app:"puzzle-tracker", solved:state.solved, notes:state.notes, solvedAt:state.solvedAt };
+    const created = await ghFetch("POST", "/gists", {
+      description:"Puzzle Tracker — synced progress",
+      public: false,
+      files:{ [GIST_FILE]:{ content: JSON.stringify(snap, null, 2) } }
+    });
+    cloudCfg.gistId = created.id;
+  }
+}
+
+async function cloudConnect(){
+  const input = document.getElementById("cloudTokenInput");
+  const token = input ? input.value.trim() : "";
+  if(!token){ toast("Paste your GitHub PAT first"); return; }
+
+  setCloudUI("syncing");
+  cloudCfg = { token, gistId: null, lastSync: null };
+
+  try{
+    // Validate token
+    const res = await fetch("https://api.github.com/user", {
+      headers:{ "Authorization":"token "+token, "Accept":"application/vnd.github+json" }
+    });
+    if(!res.ok) throw new Error("Invalid token (status " + res.status + ")");
+
+    await resolveGist();
+    saveCloudCfg();
+    setCloudUI("ok");
+    if(input) input.value = "";
+    await cloudSync();
+
+    // Offer one-time, cross-browser setup: encrypt the token with the PIN so
+    // every other browser can connect just by unlocking — no token re-entry.
+    await enableCrossBrowser(token);
+  }catch(e){
+    console.warn("Cloud connect error:", e);
+    cloudCfg = null;
+    setCloudUI("off");
+    toast("Connect failed — " + e.message);
+  }
+}
+
+/* Encrypt the token with the owner's PIN and stage it for the next snapshot. */
+async function enableCrossBrowser(token){
+  let pin = currentPin;
+  if(!pin){
+    const entry = prompt("Enter your edit PIN to enable PIN-unlock sync on all browsers\n(Cancel = keep sync on this browser only):");
+    if(entry == null) return;
+    pin = entry.trim();
+    if((await sha256Hex(pin)) !== PIN_HASH){ toast("Wrong PIN — sync stays on this browser only"); return; }
+    currentPin = pin;
+  }
+  try{
+    pendingCloudBlob = await encryptToken(token, pin);
+    toast("Sync ready — click “Save snapshot” & commit progress.js to enable PIN-unlock everywhere");
+  }catch(e){ console.warn("Could not encrypt token:", e); }
+}
+
+/* On a fresh browser: if a PIN-encrypted token was published, decrypt it with
+   the just-entered PIN and connect automatically. */
+async function maybeAutoConnectCloud(pin){
+  if(cloudCfg?.gistId) return;                          // already connected here
+  const blob = window.PUBLISHED_PROGRESS && window.PUBLISHED_PROGRESS.cloud;
+  if(!blob) return;                                     // nothing published yet
+  setCloudUI("syncing");
+  try{
+    const token = await decryptToken(blob, pin);
+    cloudCfg = { token, gistId:null, lastSync:null };
+    await resolveGist();
+    saveCloudCfg();
+    setCloudUI("ok");
+    await cloudSync();
+    toast("Cloud sync connected via PIN");
+  }catch(e){
+    console.warn("PIN auto-connect failed:", e);
+    cloudCfg = null;
+    setCloudUI("off");
+  }
+}
+
+function cloudDisconnect(){
+  if(!confirm("Disconnect cloud sync?\n\nYour local progress is kept. The remote Gist is not deleted.")) return;
+  clearTimeout(cloudPushTimer);
+  cloudCfg = null;
+  saveCloudCfg();
+  setCloudUI("off");
+  toast("Disconnected from cloud sync");
+}
+
+function setCloudUI(status){
+  const badge     = document.getElementById("cloudBadge");
+  const tokenRow  = document.getElementById("cloudTokenRow");
+  const connRow   = document.getElementById("cloudConnectedRow");
+  const lastSync  = document.getElementById("cloudLastSync");
+  if(!badge) return;
+
+  const connected = !!cloudCfg?.gistId;
+  badge.className = "cloud-badge " + (connected
+    ? (status === "error" ? "err" : status === "syncing" ? "sync" : "ok")
+    : "off");
+  badge.textContent = connected
+    ? (status === "error" ? "Error" : status === "syncing" ? "Syncing…" : "Synced")
+    : "Not connected";
+
+  if(tokenRow)  tokenRow.hidden  = connected;
+  if(connRow)   connRow.hidden   = !connected;
+  if(lastSync){
+    if(connected && cloudCfg.lastSync){
+      const d = new Date(cloudCfg.lastSync);
+      lastSync.textContent = "Last synced " + d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+    } else {
+      lastSync.textContent = "";
+    }
+  }
 }
 
 /* =========================================================================
    WIRING
    ========================================================================= */
 loadState();
+loadCloudCfg();
 render();
+listEl.insertBefore(renderDailySection(), listEl.firstChild);
 applyEditMode();
 updateProgress();
 applyFilter();
@@ -1034,6 +1442,9 @@ $("#importFile").addEventListener("change", e => {
 });
 $("#resetBtn").addEventListener("click", resetProgress);
 
+// Prevent Chrome from restoring a mid-page scroll position on reload
+if("scrollRestoration" in history) history.scrollRestoration = "manual";
+
 // Compact sticky header on scroll
 const headerEl  = $("header.app");
 let scrollTick  = false;
@@ -1045,3 +1456,16 @@ window.addEventListener("scroll", () => {
     scrollTick = false;
   });
 }, { passive:true });
+// Ensure header starts expanded (guards against any residual scroll state)
+headerEl.classList.remove("scrolled");
+
+// Cloud sync wiring
+document.getElementById("cloudConnectBtn")?.addEventListener("click", cloudConnect);
+document.getElementById("cloudSyncNowBtn")?.addEventListener("click", () => cloudSync());
+document.getElementById("cloudDisconnectBtn")?.addEventListener("click", cloudDisconnect);
+document.getElementById("cloudTokenInput")?.addEventListener("keydown", e => {
+  if(e.key === "Enter") cloudConnect();
+});
+// Init cloud UI and auto-sync on load
+setCloudUI("off");
+if(cloudCfg?.gistId) setTimeout(() => cloudSync(), 800);

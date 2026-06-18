@@ -4,9 +4,12 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#2D6A48" />
 <title>Puzzle Tracker · Archit Savaliya</title>
 
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Cdefs%3E%3ClinearGradient%20id%3D%27g%27%20x1%3D%270%27%20y1%3D%270%27%20x2%3D%271%27%20y2%3D%271%27%3E%3Cstop%20offset%3D%270%27%20stop-color%3D%27%235FB184%27%2F%3E%3Cstop%20offset%3D%271%27%20stop-color%3D%27%232D6A48%27%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2732%27%20height%3D%2732%27%20rx%3D%277%27%20fill%3D%27url%28%23g%29%27%2F%3E%3Cpath%20d%3D%27M8%2011h4a2%202%200%201%201%204%200h4v4a2%202%200%201%201%200%204v4h-4a2%202%200%201%200-4%200H8v-4a2%202%200%201%200%200-4z%27%20transform%3D%27translate%280%20-1%29%27%20fill%3D%27%23ffffff%27%20opacity%3D%270.96%27%2F%3E%3C%2Fsvg%3E" />
 <link rel="stylesheet" href="styles.css" />
+<script>if("scrollRestoration" in history) history.scrollRestoration = "manual";</script>
 </head>
 
 <body>
@@ -160,7 +163,7 @@
   <section class="panel">
     <div class="panel-head">
       <h3>Your data</h3>
-      <span class="hint">saved locally in this browser</span>
+      <span class="hint">saved locally &amp; optionally synced via GitHub Gist</span>
     </div>
     <div class="data-actions">
       <button class="btn notes-pdf-btn" id="notesPdfBtn" type="button" title="Export all notes as PDF">
@@ -187,6 +190,28 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"/></svg>
         <span class="label">Reset all</span>
       </button>
+    </div>
+    <!-- Cloud Sync -->
+    <div class="cloud-sync-wrap">
+      <div class="cloud-sync-head">
+        <div class="cloud-sync-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 0 1 0 9z"/></svg>
+          <span>Cloud Sync</span>
+        </div>
+        <span class="cloud-badge" id="cloudBadge">Not connected</span>
+      </div>
+      <p class="cloud-desc"><strong>One-time setup:</strong> create a <strong>GitHub PAT</strong> with <code>gist</code> scope at github.com/settings/tokens, paste it below &amp; Connect, then <strong>Save snapshot</strong> and commit <code>progress.js</code>. After that, every other browser connects automatically the moment you unlock with your <strong>PIN</strong> — no token re-entry.</p>
+      <div class="cloud-token-row" id="cloudTokenRow">
+        <input type="password" id="cloudTokenInput" class="cloud-token-input" placeholder="ghp_…" autocomplete="off" spellcheck="false" />
+        <button class="btn" id="cloudConnectBtn" type="button">Connect</button>
+      </div>
+      <div class="cloud-connected-row" id="cloudConnectedRow" hidden>
+        <span class="cloud-last" id="cloudLastSync"></span>
+        <div class="cloud-btns">
+          <button class="btn" id="cloudSyncNowBtn" type="button">Sync now</button>
+          <button class="btn danger" id="cloudDisconnectBtn" type="button">Disconnect</button>
+        </div>
+      </div>
     </div>
     <p class="data-note" id="dataNote">Export regularly to back up across devices &middot; Notes PDF prints every puzzle note into one document &middot; Reset clears solves &amp; notes (can't be undone).</p>
   </section>
