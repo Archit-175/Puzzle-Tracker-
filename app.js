@@ -1442,13 +1442,21 @@ $("#importFile").addEventListener("change", e => {
 });
 $("#resetBtn").addEventListener("click", resetProgress);
 
-// Prevent Chrome from restoring a mid-page scroll position on reload
-if("scrollRestoration" in history) history.scrollRestoration = "manual";
-
 // Compact sticky header on scroll
 const headerEl  = $("header.app");
 let scrollTick  = false;
+
+/* Chrome restores file:// scroll positions AFTER the load event even when
+   history.scrollRestoration = 'manual'. Guard: any scroll that fires within
+   500 ms of load is assumed to be Chrome's restoration — reset it to 0 so
+   the header title stays visible on every page load. */
+let _loadGuard = true;
+window.addEventListener("load", () => {
+  setTimeout(() => { _loadGuard = false; }, 500);
+});
+
 window.addEventListener("scroll", () => {
+  if (_loadGuard) { window.scrollTo(0, 0); return; }
   if(scrollTick) return;
   scrollTick = true;
   requestAnimationFrame(() => {
@@ -1456,8 +1464,6 @@ window.addEventListener("scroll", () => {
     scrollTick = false;
   });
 }, { passive:true });
-// Ensure header starts expanded (guards against any residual scroll state)
-headerEl.classList.remove("scrolled");
 
 // Cloud sync wiring
 document.getElementById("cloudConnectBtn")?.addEventListener("click", cloudConnect);
