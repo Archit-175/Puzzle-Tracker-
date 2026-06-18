@@ -219,6 +219,7 @@ body.complete .bar > i{ animation:sheen 2.4s ease-in-out infinite; }
   transition:border-color .16s ease, box-shadow .16s ease;
 }
 .search input::placeholder{ color:var(--ink-3); }
+.search input::-webkit-search-cancel-button{ display:none; }
 .search input:focus{ outline:none; border-color:var(--green); box-shadow:0 0 0 3px var(--green-tint); }
 .search .clear{
   position:absolute; right:8px; top:50%; transform:translateY(-50%);
