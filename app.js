@@ -1081,41 +1081,41 @@ function route(){
 }
 
 /* =========================================================================
-   DAILY PUZZLES  — 3 random questions per day, no repeats until all done
+   DAILY PUZZLES  — 3 deterministic puzzles per day (same in every browser)
+   Picks are derived from the date using a seeded PRNG, so all browsers show
+   the same puzzles without any localStorage coordination.
    ========================================================================= */
-const DAILY_KEY = "puzzleTracker.daily";
 
-function shuffle(arr){
-  const a = [...arr];
-  for(let i = a.length-1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i+1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
+/* Mulberry32 seeded PRNG — fast, good distribution */
+function seededRng(seed){
+  let s = seed | 0;
+  return function(){
+    s = Math.imul(s ^ (s >>> 15), s | 1);
+    s ^= s + Math.imul(s ^ (s >>> 7), s | 61);
+    return ((s ^ (s >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* Turn "YYYY-MM-DD" into a stable integer seed */
+function dateToSeed(dateStr){
+  let h = 0;
+  for(let i = 0; i < dateStr.length; i++) h = Math.imul(31, h) + dateStr.charCodeAt(i) | 0;
+  return h;
 }
 
 function getDailyPicks(){
-  const today = todayStr();
+  const today   = todayStr();
   const allUrls = PUZZLES.map(p => p.url);
-  let ds = null;
-  try{ const raw = localStorage.getItem(DAILY_KEY); if(raw) ds = JSON.parse(raw); }catch(e){}
 
-  // Return today's existing picks if still valid
-  if(ds && ds.date === today && Array.isArray(ds.picks) && ds.picks.length === 3){
-    const valid = ds.picks.filter(u => allUrls.includes(u));
-    if(valid.length === 3) return valid;
+  /* Deterministic Fisher-Yates shuffle seeded by today's date.
+     Same date → same 3 puzzles in every browser, with no localStorage needed. */
+  const rng      = seededRng(dateToSeed(today));
+  const shuffled = [...allUrls];
+  for(let i = shuffled.length - 1; i > 0; i--){
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-
-  // Build / continue the queue (filter out any stale URLs after puzzle list changes)
-  let queue = (ds && Array.isArray(ds.queue)) ? ds.queue.filter(u => allUrls.includes(u)) : [];
-  if(queue.length < 3){
-    const inQueue = new Set(queue);
-    queue.push(...shuffle(allUrls.filter(u => !inQueue.has(u))));
-  }
-
-  const picks = queue.splice(0, 3);
-  try{ localStorage.setItem(DAILY_KEY, JSON.stringify({ date:today, picks, queue })); }catch(e){}
-  return picks;
+  return shuffled.slice(0, 3);
 }
 
 function renderDailySection(){
