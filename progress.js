@@ -5,5 +5,10 @@ window.PUBLISHED_PROGRESS = {
   "solved": {},
   "notes": {},
   "solvedAt": {},
-  "cloud": null
+  "cloud": {
+    "v": 1,
+    "salt": "az8KHZzHwsJ8832pXFUu5w==",
+    "iv": "wKnsEaQWClIshgpa",
+    "ct": "TFg5nRCCNYFeGk3NnnLGLgMKw0ovH6ofWPbAGPSVBFuCJXYki9PgtX/fnIjxIGezgpUNf1Hcuv0="
+  }
 };
