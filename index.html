@@ -191,36 +191,13 @@
         <span class="label">Reset all</span>
       </button>
     </div>
-    <!-- Cloud Sync -->
-    <div class="cloud-sync-wrap">
-      <div class="cloud-sync-head">
-        <div class="cloud-sync-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 0 1 0 9z"/></svg>
-          <span>Cloud Sync</span>
-        </div>
-        <span class="cloud-badge" id="cloudBadge">Not connected</span>
-      </div>
-      <p class="cloud-desc"><strong>One-time setup:</strong> create a <strong>GitHub PAT</strong> with <code>gist</code> scope at github.com/settings/tokens, paste it below &amp; Connect, then <strong>Save snapshot</strong> and commit <code>progress.js</code>. After that, every other browser connects automatically the moment you unlock with your <strong>PIN</strong> — no token re-entry.</p>
-      <div class="cloud-token-row" id="cloudTokenRow">
-        <input type="password" id="cloudTokenInput" class="cloud-token-input" placeholder="ghp_…" autocomplete="off" spellcheck="false" />
-        <button class="btn" id="cloudConnectBtn" type="button">Connect</button>
-      </div>
-      <div class="cloud-connected-row" id="cloudConnectedRow" hidden>
-        <span class="cloud-last" id="cloudLastSync"></span>
-        <div class="cloud-btns">
-          <button class="btn" id="cloudSyncNowBtn" type="button">Sync now</button>
-          <button class="btn danger" id="cloudDisconnectBtn" type="button">Disconnect</button>
-        </div>
-      </div>
-    </div>
-    <p class="data-note" id="dataNote">Export regularly to back up across devices &middot; Notes PDF prints every puzzle note into one document &middot; Reset clears solves &amp; notes (can't be undone).</p>
+    <p class="data-note" id="dataNote">Export regularly to back up &middot; Notes PDF prints every puzzle note into one document &middot; Reset clears solves &amp; notes (can't be undone).</p>
   </section>
 
 </main>
 
 <footer>
   Progress &amp; notes are saved <b>locally in this browser</b> via localStorage.
-  Use <b>Export</b> to back up &amp; move to another device, <b>Notes PDF</b> to print all notes.
 </footer>
 
 <div class="toast" id="toast" role="status" aria-live="polite">

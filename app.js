@@ -130,14 +130,17 @@ function loadState(){
   state.solved   = (pub.solved   && typeof pub.solved   === "object") ? { ...pub.solved }   : {};
   state.notes    = (pub.notes    && typeof pub.notes    === "object") ? { ...pub.notes }    : {};
   state.solvedAt = (pub.solvedAt && typeof pub.solvedAt === "object") ? { ...pub.solvedAt } : {};
-  state.collapsed = {};
+  // Default: all categories collapsed so topics are compact; clicking expands them
+  const defaultCollapsed = {};
+  for(const c of CATEGORY_ORDER) defaultCollapsed[c] = true;
+  state.collapsed = { ...defaultCollapsed };
   // 2) The owner's working copy (localStorage on their own device) overrides it
   try{
     const raw = localStorage.getItem(STORAGE_KEY);
     if(raw){
       const p = JSON.parse(raw);
       state.solved    = (p && typeof p.solved    === "object" && p.solved)    || {};
-      state.collapsed = (p && typeof p.collapsed === "object" && p.collapsed) || {};
+      state.collapsed = (p && typeof p.collapsed === "object" && p.collapsed) || { ...defaultCollapsed };
       state.notes     = (p && typeof p.notes     === "object" && p.notes)     || {};
       state.solvedAt  = (p && typeof p.solvedAt  === "object" && p.solvedAt)  || {};
     }
@@ -707,6 +710,9 @@ function importProgress(file){
 }
 
 function resetProgress(){
+  const code = prompt("Enter the reset code to continue:");
+  if(code === null) return;
+  if(code !== "9978006612"){ alert("Incorrect code. Reset cancelled."); return; }
   const n = solvedCount();
   if(!confirm("Reset all progress?\n\nThis will clear "+n+" solved puzzle"+(n===1?"":"s")+
     " and all notes from this browser.\n\nThis can't be undone (Export first if you want a backup).")) return;
