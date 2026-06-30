@@ -915,16 +915,15 @@ function buildCumulativeSVG(a){
   const today = startOfToday();
   const days  = Math.max(1, Math.round((today - first) / 86400000));
 
-  // Daily cumulative series
-  const pts = []; let cum = 0;
+  // Daily solved series (count per day)
+  const pts = [];
   for(let i=0; i<=days; i++){
     const ds = ymd(addDays(first, i));
-    cum += a.byDate[ds] || 0;
-    pts.push({ i, cum });
+    pts.push({ i, cum: a.byDate[ds] || 0 });
   }
 
   const W = 720, H = 240, padL = 36, padR = 16, padT = 14, padB = 30;
-  const maxY = niceCeil(Math.max(a.datedTotal, 4));
+  const maxY = niceCeil(Math.max(a.bestDay, 4));
   const X = i => padL + (W - padL - padR) * (days === 0 ? 0 : i / days);
   const Y = v => padT + (H - padT - padB) * (1 - v / maxY);
 
@@ -956,7 +955,7 @@ function buildCumulativeSVG(a){
   const last = pts[pts.length-1];
   const dot = `<circle class="chart-dot" cx="${X(last.i).toFixed(1)}" cy="${Y(last.cum).toFixed(1)}" r="3.5"/>`;
 
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cumulative puzzles solved over time">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Puzzles solved per day over time">
     <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="oklch(0.60 0.13 162)" stop-opacity="0.28"/>
       <stop offset="100%" stop-color="oklch(0.60 0.13 162)" stop-opacity="0.02"/>
