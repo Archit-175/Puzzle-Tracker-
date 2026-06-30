@@ -1105,12 +1105,17 @@ function dateToSeed(dateStr){
 
 function getDailyPicks(){
   const today   = todayStr();
-  const allUrls = PUZZLES.map(p => p.url);
+
+  /* Only consider puzzles that haven't been solved yet, so the daily
+     section never surfaces questions that are already done. */
+  let pool = PUZZLES.filter(p => !state.solved[p.url]).map(p => p.url);
+  /* Fall back to the full set once everything is solved. */
+  if(pool.length === 0) pool = PUZZLES.map(p => p.url);
 
   /* Deterministic Fisher-Yates shuffle seeded by today's date.
-     Same date → same 3 puzzles in every browser, with no localStorage needed. */
+     Same date → same picks in every browser (for the same solved state). */
   const rng      = seededRng(dateToSeed(today));
-  const shuffled = [...allUrls];
+  const shuffled = [...pool];
   for(let i = shuffled.length - 1; i > 0; i--){
     const j = Math.floor(rng() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
